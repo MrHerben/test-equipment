@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление оборудованием</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #333; }
+        label { display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], textarea, select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; }
+        button:hover { background-color: #0056b3; }
+        .error { color: red; font-size: 0.9em; }
+        .success { color: green; font-size: 0.9em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .search-form, .add-form, .edit-form { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 4px; }
+        .form-section { margin-bottom: 20px; }
+        .actions button { font-size: 0.8em; padding: 5px 8px;}
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; }
+        .modal-content { background-color: white; padding: 20px; border-radius: 5px; width: 400px; }
+        .login-form label { /* Добавим стиль для label внутри login-form, чтобы контролировать промежуток */
+            display: block;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .login-form input[type="text"],
+        .login-form input[type="password"] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .login-form button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: block;
+            box-sizing: border-box;
+            margin-top: 10px;
+        }
+
+        .login-form button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <h1>Управление оборудованием</h1>
+
+        <div v-if="!authToken" class="login-form form-section">
+            <h2>Вход в систему</h2>
+            <label for="username">Имя пользователя:</label>
+            <input type="text" id="username" v-model="loginForm.username">
+            <label for="password">Пароль:</label>
+            <input type="password" id="password" v-model="loginForm.password">
+            <button @click="login">Войти</button>
+            <p v-if="loginError" class="error">{{ loginError }}</p>
+        </div>
+
+        <div v-if="authToken">
+            <p>Вы вошли в систему. <button @click="logout">Выйти</button></p>
+
+            <div class="add-form form-section">
+                <h2>Добавить оборудование</h2>
+                <label for="add-type">Тип оборудования:</label>
+                <select id="add-type" v-model="addForm.equipment_type_id">
+                    <option disabled value="">Выберите тип</option>
+                    <option v-for="type in equipmentTypes" :value="type.id">{{ type.name }} (Маска: {{ type.serial_number_mask }})</option>
+                </select>
+
+                <label for="add-serials">Серийные номера (каждый с новой строки):</label>
+                <textarea id="add-serials" v-model="addForm.serial_numbers_text" rows="3"></textarea>
+                <small>Маска для выбранного типа: {{ selectedTypeMask }}</small>
+
+
+                <label for="add-note">Примечание:</label>
+                <textarea id="add-note" v-model="addForm.note" rows="2"></textarea>
+
+                <button @click="addEquipment">Добавить</button>
+                <div v-if="addForm.errors.length > 0">
+                    <p class="error">Ошибки при добавлении:</p>
+                    <ul>
+                        <li v-for="error in addForm.errors" class="error">{{ error.serial_number ? `S/N ${error.serial_number}: ` : '' }}{{ error.error || error.detail || JSON.stringify(error) }}</li>
+                    </ul>
+                </div>
+                 <div v-if="addForm.successMessage" class="success">{{ addForm.successMessage }}</div>
+            </div>
+
+            <hr>
+
+            <div class="search-form form-section">
+                <h2>Список и поиск оборудования</h2>
+                <label for="search-term">Поиск по S/N или примечанию:</label>
+                <input type="text" id="search-term" v-model="searchParams.search" @input="debouncedFetchEquipment">
+
+                <label for="search-type">Тип оборудования (наименование):</label>
+                <select v-model="searchParams.equipment_type__name">
+                    <option value="">Все типы</option>
+                    <option v-for="type in equipmentTypes" :value="type.name">{{ type.name }}</option>
+                </select>
+                <button @click="fetchEquipment">Найти</button>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Тип (ID)</th>
+                        <th>Наименование типа</th>
+                        <th>Серийный номер</th>
+                        <th>Примечание</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-if="loadingEquipment">
+                        <td colspan="6">Загрузка...</td>
+                    </tr>
+                    <tr v-for="item in equipmentList" :key="item.id">
+                        <td>{{ item.id }}</td>
+                        <td>{{ item.equipment_type.id }}</td>
+                        <td>{{ item.equipment_type.name }}</td>
+                        <td>{{ item.serial_number }}</td>
+                        <td>{{ item.note }}</td>
+                        <td class="actions">
+                            <button @click="startEdit(item)">Редактировать</button>
+                            <button @click="deleteEquipment(item.id)">Удалить</button>
+                        </td>
+                    </tr>
+                    <tr v-if="!loadingEquipment && equipmentList.length === 0">
+                        <td colspan="6">Нет данных.</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div v-if="pagination.totalPages > 1">
+                <button @click="changePage(pagination.currentPage - 1)" :disabled="!pagination.previous">Пред.</button>
+                <span>Страница {{ pagination.currentPage }} из {{ pagination.totalPages }}</span>
+                <button @click="changePage(pagination.currentPage + 1)" :disabled="!pagination.next">След.</button>
+            </div>
+        </div>
+
+        <div v-if="editingItem" class="modal">
+            <div class="modal-content edit-form">
+                <h2>Редактировать оборудование (ID: {{ editingItem.id }})</h2>
+
+                <label for="edit-type">Тип оборудования:</label>
+                 <select id="edit-type" v-model="editForm.equipment_type_id">
+                    <option v-for="type in equipmentTypes" :value="type.id">{{ type.name }}</option>
+                </select>
+
+                <label for="edit-serial">Серийный номер:</label>
+                <input type="text" id="edit-serial" v-model="editForm.serial_number">
+                <small>Маска для выбранного типа: {{ selectedEditTypeMask }}</small>
+
+
+                <label for="edit-note">Примечание:</label>
+                <textarea id="edit-note" v-model="editForm.note" rows="3"></textarea>
+
+                <button @click="saveEdit">Сохранить</button>
+                <button @click="cancelEdit">Отмена</button>
+                <p v-if="editForm.error" class="error">{{ editForm.error }}</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, onMounted, computed, watch } = Vue;
+
+        const app = createApp({
+            setup() {
+                const apiBaseUrl = 'http://127.0.0.1:8000/api';
+                const authToken = ref(localStorage.getItem('authToken'));
+                const loginForm = reactive({ username: '', password: '' });
+                const loginError = ref('');
+
+                const equipmentTypes = ref([]);
+                const equipmentList = ref([]);
+                const loadingEquipment = ref(false);
+
+                const addForm = reactive({
+                    equipment_type_id: '',
+                    serial_numbers_text: '',
+                    note: '',
+                    errors: [],
+                    successMessage: ''
+                });
+
+                const searchParams = reactive({
+                    search: '',
+                    equipment_type__name: '',
+                    page: 1,
+                });
+                const pagination = reactive({
+                    count: 0,
+                    next: null,
+                    previous: null,
+                    currentPage: 1,
+                    totalPages: 1
+                });
+
+
+                const editingItem = ref(null);
+                const editForm = reactive({
+                    id: null,
+                    equipment_type_id: '',
+                    serial_number: '',
+                    note: '',
+                    error: ''
+                });
+
+                // --- LOGIN ---
+                const login = async () => {
+                    loginError.value = '';
+                    try {
+                        const response = await axios.post(`${apiBaseUrl}/user/login/`, {
+                            username: loginForm.username,
+                            password: loginForm.password
+                        });
+                        authToken.value = response.data.access;
+                        localStorage.setItem('authToken', authToken.value);
+                        // После логина загружаем нужные данные
+                        fetchEquipmentTypes();
+                        fetchEquipment();
+                    } catch (error) {
+                        loginError.value = 'Ошибка входа. Проверьте имя пользователя и пароль.';
+                        console.error("Login error:", error.response?.data || error.message);
+                    }
+                };
+
+                const logout = () => {
+                    authToken.value = null;
+                    localStorage.removeItem('authToken');
+                    equipmentList.value = []; // Очищаем данные
+                    equipmentTypes.value = [];
+                };
+
+                // --- AXIOS INSTANCE WITH AUTH ---
+                const apiClient = axios.create({
+                    baseURL: apiBaseUrl,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                apiClient.interceptors.request.use(config => {
+                    if (authToken.value) {
+                        config.headers.Authorization = `Bearer ${authToken.value}`;
+                    }
+                    return config;
+                }, error => {
+                    return Promise.reject(error);
+                });
+
+
+                // --- EQUIPMENT TYPES ---
+                const fetchEquipmentTypes = async () => {
+                    if (!authToken.value) return;
+                    try {
+                        const response = await apiClient.get('/equipment-type/?page_size=100'); // Получаем все типы для селектов
+                        equipmentTypes.value = response.data.results || response.data; // response.data.results если есть пагинация
+                    } catch (error) {
+                        console.error("Error fetching equipment types:", error.response?.data || error.message);
+                        handleApiError(error, "типов оборудования");
+                    }
+                };
+
+                const selectedTypeMask = computed(() => {
+                    if (addForm.equipment_type_id) {
+                        const type = equipmentTypes.value.find(t => t.id === addForm.equipment_type_id);
+                        return type ? type.serial_number_mask : 'Маска не найдена';
+                    }
+                    return 'Выберите тип для отображения маски';
+                });
+
+                const selectedEditTypeMask = computed(() => {
+                    if (editForm.equipment_type_id) {
+                        const type = equipmentTypes.value.find(t => t.id === editForm.equipment_type_id);
+                        return type ? type.serial_number_mask : 'Маска не найдена';
+                    }
+                    return 'Маска не найдена';
+                });
+
+
+                // --- EQUIPMENT ---
+                const fetchEquipment = async () => {
+                    if (!authToken.value) return;
+                    loadingEquipment.value = true;
+                    addForm.errors = []; // Сбрасываем ошибки при новой загрузке
+                    addForm.successMessage = '';
+
+                    let params = { page: searchParams.page };
+                    if (searchParams.search) params.search = searchParams.search;
+                    if (searchParams.equipment_type__name) params.equipment_type__name = searchParams.equipment_type__name;
+
+                    try {
+                        const response = await apiClient.get('/equipment/', { params });
+                        equipmentList.value = response.data.results;
+                        pagination.count = response.data.count;
+                        pagination.next = response.data.next;
+                        pagination.previous = response.data.previous;
+                        pagination.currentPage = searchParams.page;
+                        pagination.totalPages = Math.ceil(response.data.count / 10);
+                    } catch (error) {
+                        console.error("Error fetching equipment:", error.response?.data || error.message);
+                        handleApiError(error, "оборудования");
+                    } finally {
+                        loadingEquipment.value = false;
+                    }
+                };
+
+                // Debounce для поиска
+                let debounceTimer;
+                const debouncedFetchEquipment = () => {
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        searchParams.page = 1;
+                        fetchEquipment();
+                    }, 500);
+                };
+
+
+                const addEquipment = async () => {
+                    if (!authToken.value || !addForm.equipment_type_id || !addForm.serial_numbers_text.trim()) {
+                        addForm.errors = [{error: "Тип оборудования и серийные номера обязательны."}];
+                        return;
+                    }
+                    addForm.errors = [];
+                    addForm.successMessage = '';
+
+                    const serial_numbers = addForm.serial_numbers_text.trim().split('\n').map(sn => sn.trim()).filter(sn => sn);
+                    if (serial_numbers.length === 0) {
+                         addForm.errors = [{error: "Введите хотя бы один серийный номер."}];
+                        return;
+                    }
+
+                    const payload = {
+                        equipment_type_id: parseInt(addForm.equipment_type_id),
+                        serial_numbers: serial_numbers,
+                        note: addForm.note
+                    };
+
+                    try {
+                        const response = await apiClient.post('/equipment/', payload);
+                        // API возвращает { created_equipment: [...], errors: [...] }
+                        let message = "";
+                        if (response.data.created_equipment && response.data.created_equipment.length > 0) {
+                            message += `Успешно добавлено: ${response.data.created_equipment.length} шт. `;
+                            addForm.serial_numbers_text = ''; // Очищаем поле после успеха
+                            addForm.note = '';
+                        }
+                        if (response.data.errors && response.data.errors.length > 0) {
+                            addForm.errors = response.data.errors;
+                            message += `Обнаружены ошибки: ${response.data.errors.length} шт.`;
+                        }
+                        if (!message) { // На случай если ответ не содержит ни того, ни другого
+                            message = "Запрос обработан.";
+                        }
+                        addForm.successMessage = message.trim();
+                        fetchEquipment(); // Обновляем список
+                    } catch (error) {
+                        console.error("Error adding equipment:", error.response?.data || error.message);
+                        if (error.response && error.response.data) {
+                            if (error.response.data.errors) { // Если это наш формат ошибок
+                                addForm.errors = error.response.data.errors;
+                            } else { // Другие ошибки валидации от DRF
+                                addForm.errors = Object.entries(error.response.data).map(([key, val]) => ({
+                                    error: `${key}: ${Array.isArray(val) ? val.join(', ') : val}`
+                                }));
+                            }
+                        } else {
+                            addForm.errors = [{ error: "Неизвестная ошибка при добавлении." }];
+                        }
+                    }
+                };
+
+                const startEdit = (item) => {
+                    editingItem.value = item; // Сохраняем весь объект для возможного отката
+                    editForm.id = item.id;
+                    editForm.equipment_type_id = item.equipment_type.id;
+                    editForm.serial_number = item.serial_number;
+                    editForm.note = item.note;
+                    editForm.error = '';
+                };
+
+                const saveEdit = async () => {
+                    if (!authToken.value || !editForm.id) return;
+                    editForm.error = '';
+
+                    const payload = {
+                        equipment_type_id: parseInt(editForm.equipment_type_id),
+                        serial_number: editForm.serial_number,
+                        note: editForm.note
+                    };
+
+                    // Валидация на клиенте (минимальная)
+                    if (!payload.serial_number.trim()) {
+                        editForm.error = "Серийный номер не может быть пустым.";
+                        return;
+                    }
+                    // Проверка соответствия маске на клиенте
+                    const type = equipmentTypes.value.find(t => t.id === payload.equipment_type_id);
+                    if (type && !validateSNClient(payload.serial_number, type.serial_number_mask)) {
+                        editForm.error = `Серийный номер не соответствует маске "${type.serial_number_mask}". (N-цифра, A-Б.БУКВА, a-м.буква, X-Б.БУКВА/цифра, Z: -_@ )`;
+                        return;
+                    }
+
+
+                    try {
+                        await apiClient.put(`/equipment/${editForm.id}/`, payload);
+                        cancelEdit(); // Закрываем модалку
+                        fetchEquipment(); // Обновляем список
+                    } catch (error) {
+                        console.error("Error updating equipment:", error.response?.data || error.message);
+                        if (error.response && error.response.data) {
+                           const errors = error.response.data;
+                           editForm.error = Object.values(errors).flat().join(' ');
+                        } else {
+                           editForm.error = "Ошибка при сохранении.";
+                        }
+                    }
+                };
+
+                const cancelEdit = () => {
+                    editingItem.value = null;
+                    // Сброс формы редактирования
+                    editForm.id = null;
+                    editForm.equipment_type_id = '';
+                    editForm.serial_number = '';
+                    editForm.note = '';
+                    editForm.error = '';
+                };
+
+                const deleteEquipment = async (id) => {
+                    if (!authToken.value || !confirm(`Вы уверены, что хотите удалить оборудование с ID ${id}?`)) {
+                        return;
+                    }
+                    try {
+                        await apiClient.delete(`/equipment/${id}/`);
+                        fetchEquipment(); // Обновляем список
+                    } catch (error) {
+                        console.error("Error deleting equipment:", error.response?.data || error.message);
+                        handleApiError(error, "удаления оборудования");
+                        alert(`Ошибка при удалении: ${error.response?.data?.detail || error.message}`);
+                    }
+                };
+
+                const changePage = (newPage) => {
+                    if (newPage > 0 && newPage <= pagination.totalPages) {
+                        searchParams.page = newPage;
+                        fetchEquipment();
+                    }
+                };
+
+                // --- UTILS ---
+                const handleApiError = (error, context = "операции") => {
+                    // Простая обработка ошибок, можно расширить для показа пользователю
+                    if (error.response && error.response.status === 401) {
+                        alert("Сессия истекла или недействительна. Пожалуйста, войдите снова.");
+                        logout(); // Разлогиниваем, если токен невалиден
+                    } else {
+                        console.error(`API error during ${context}:`, error);
+                    }
+                };
+
+                // Клиентская валидация маски
+                const validateSNClient = (serial_number, mask) => {
+                    if (serial_number.length !== mask.length) return false;
+                    const patternMap = {
+                        'N': /^\d$/,
+                        'A': /^[A-Z]$/,
+                        'a': /^[a-z]$/,
+                        'X': /^[A-Z0-9]$/,
+                        'Z': /^[-_@]$/
+                    };
+                    for (let i = 0; i < mask.length; i++) {
+                        const maskChar = mask[i];
+                        const snChar = serial_number[i];
+                        if (patternMap[maskChar]) {
+                            if (!patternMap[maskChar].test(snChar)) return false;
+                        } else { // Если символ в маске не спецсимвол, он должен совпадать
+                            if (maskChar !== snChar) return false;
+                        }
+                    }
+                    return true;
+                };
+
+
+                onMounted(() => {
+                    if (authToken.value) {
+                        fetchEquipmentTypes();
+                        fetchEquipment();
+                    }
+                });
+
+                watch(() => searchParams.equipment_type__name, () => {
+                    searchParams.page = 1;
+                    fetchEquipment();
+                });
+
+
+                return {
+                    apiBaseUrl,
+                    authToken,
+                    loginForm,
+                    loginError,
+                    login,
+                    logout,
+
+                    equipmentTypes,
+                    equipmentList,
+                    loadingEquipment,
+
+                    addForm,
+                    addEquipment,
+                    selectedTypeMask,
+
+                    searchParams,
+                    debouncedFetchEquipment,
+                    fetchEquipment,
+
+                    editingItem,
+                    editForm,
+                    startEdit,
+                    saveEdit,
+                    cancelEdit,
+                    selectedEditTypeMask,
+
+                    deleteEquipment,
+
+                    pagination,
+                    changePage,
+                    validateSNClient
+                };
+            }
+        });
+
+        app.mount('#app');
+    </script>
+</body>
+</html>
