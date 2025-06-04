@@ -35,29 +35,6 @@ class EquipmentTypeViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'serial_number_mask']
     ordering_fields = ['id', 'name']
 
-    def list(self, request, *args, **kwargs):
-        """
-        Вывод пагинированного списка типов оборудования
-        с возможностью поиска путем указания query параметров.
-        """
-        return super().list(request, *args, **kwargs)
-
-    def retrieve(self, request, *args, **kwargs):
-        """Запрос данных по id."""
-        return super().retrieve(request, *args, **kwargs)
-
-    def create(self, request, *args, **kwargs):
-        """Создание новой записи."""
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        """Редактирование записи."""
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        """Частичное редактирование записи."""
-        return super().partial_update(request, *args, **kwargs)
-
     def destroy(self, request, *args, **kwargs):
         """Удаление записи."""
         # Прежде чем удалять тип, можно добавить проверку, не используется ли он оборудованием
@@ -170,10 +147,6 @@ class EquipmentViewSet(viewsets.ModelViewSet):
             # Иначе, стандартная ошибка валидации DRF
             return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
 
-
-
-
-
     def destroy(self, request, *args, **kwargs):
         """
         Мягкое удаление записи.
@@ -183,22 +156,3 @@ class EquipmentViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Оборудование уже было удалено."}, status=status.HTTP_400_BAD_REQUEST)
         instance.soft_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-        
-    def list(self, request, *args, **kwargs):
-        """
-        Вывод пагинированного списка оборудования
-        с возможностью поиска путем указания query параметров.
-        """
-        return super().list(request, *args, **kwargs)
-
-    def retrieve(self, request, *args, **kwargs):
-        """Запрос данных по id."""
-        return super().retrieve(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        """Редактирование записи."""
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        """Частичное редактирование записи."""
-        return super().partial_update(request, *args, **kwargs)

@@ -12,6 +12,15 @@ class EquipmentType(models.Model):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+        # Валидация маски серийного номера
+        allowed_mask_chars = set('NAaXZ')
+        if not all(char in allowed_mask_chars for char in self.serial_number_mask):
+            raise ValidationError({
+                'serial_number_mask': "Маска серийного номера может содержать только символы 'N', 'A', 'a', 'X', 'Z'."
+            })
+
     class Meta:
         verbose_name = "Тип оборудования"
         verbose_name_plural = "Типы оборудования"
@@ -61,12 +70,9 @@ class Equipment(models.Model):
 
         regex_pattern = ""
         for char_mask in mask:
-            if char_mask in pattern_map:
-                regex_pattern += pattern_map[char_mask]
-            else: # Если в маске есть символ, не являющийся кодом, он должен совпадать буквально
-                regex_pattern += re.escape(char_mask)
+            regex_pattern += pattern_map[char_mask] 
 
-        regex_pattern = f"^{regex_pattern}$" # Строгое соответствие всей строки
+        regex_pattern = f"^{regex_pattern}$" # Исправил логику, теперь строгое соответствие всей строки
 
         return bool(re.match(regex_pattern, serial_number))
 

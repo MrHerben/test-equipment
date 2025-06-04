@@ -1,6 +1,32 @@
 from pathlib import Path
+import configparser
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_PATH = os.path.join(BASE_DIR, 'settings.ini')
+
+config = configparser.ConfigParser()
+
+# Читаем файл settings.ini
+try:
+    config.read(CONFIG_PATH)
+except configparser.Error as e:
+    print(f"Ошибка при чтении файла settings.ini: {e}")
+    exit()
+
+try:
+    DB_NAME = config['MySQL Database']['name']
+    DB_USER = config['MySQL Database']['user']
+    DB_PASSWORD = config['MySQL Database']['password']
+    DB_HOST = config['MySQL Database']['host']
+    DB_PORT = config['MySQL Database']['port']
+    PAGE_SIZE = config['Other']['page_size']
+except KeyError as e:
+    print(f"Отсутствует ключ в секции 'MySQL Database' в settings.ini: {e}")
+    exit()
+except ValueError as e:
+    print(f"Ошибка преобразования типа в settings.ini: {e}")
+    exit()
 
 SECRET_KEY = 'django-insecure-sups03ym0_5&b5=*$#0!0462xc*@6jvl=3t+dhxc*p6ar_3zmp'
 
@@ -57,11 +83,11 @@ WSGI_APPLICATION = 'core.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'equipement_project',
-        'USER': 'root',
-        'PASSWORD': 'root',
-        'HOST': 'localhost',
-        'PORT': '3306',
+        'NAME': DB_NAME,
+        'USER': DB_USER,
+        'PASSWORD': DB_PASSWORD,
+        'HOST': DB_HOST,
+        'PORT': DB_PORT,
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
         },
@@ -98,7 +124,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,
+    'PAGE_SIZE': PAGE_SIZE,
 
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication'
