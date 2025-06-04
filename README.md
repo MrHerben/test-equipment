@@ -10,8 +10,7 @@
     ```
     mysql -u [имя_нового_пользователя_бд] -p [имя_новой_бд] < db.sql
     ```
-3. Настройка параметров в settings.ini
-    По умолчанию они такие:
+3. Настройка параметров в settings.ini:
     ```
     [MySQL Database]
     name=equipement_project
